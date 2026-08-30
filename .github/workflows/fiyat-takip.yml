@@ -1,0 +1,47 @@
+name: Fiyat Takip
+
+on:
+  schedule:
+    # UTC saatiyle 05:00, 11:00, 17:00 -> Türkiye'de 08:00, 14:00, 20:00
+    - cron: "0 5,11,17 * * *"
+  workflow_dispatch:        # "Run workflow" butonuyla elle de çalıştırılabilir
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fiyat-takip
+  cancel-in-progress: false
+
+jobs:
+  kontrol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Depoyu indir
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Paketleri yükle
+        run: pip install -r requirements.txt
+
+      - name: Fiyatları kontrol et
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MIN_DUSUS_YUZDE: "1.0"
+        run: python fiyat_takip.py
+
+      - name: Fiyat geçmişini kaydet
+        run: |
+          git config user.name "fiyat-takip-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add fiyat_gecmisi.json
+          git diff --staged --quiet || git commit -m "Fiyat güncellemesi $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push
