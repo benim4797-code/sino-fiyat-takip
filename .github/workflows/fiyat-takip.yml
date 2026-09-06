@@ -31,6 +31,12 @@ jobs:
       - name: Paketleri yükle
         run: pip install -r requirements.txt
 
+      - name: Telegram'dan yeni ürünleri al
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python telegram_ekle.py
+
       - name: Fiyatları kontrol et
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -38,10 +44,11 @@ jobs:
           MIN_DUSUS_YUZDE: "1.0"
         run: python fiyat_takip.py
 
-      - name: Fiyat geçmişini kaydet
+      - name: Değişiklikleri kaydet
         run: |
           git config user.name "fiyat-takip-bot"
           git config user.email "bot@users.noreply.github.com"
-          git add fiyat_gecmisi.json
+          git add fiyat_gecmisi.json urunler.csv telegram_durum.json
           git diff --staged --quiet || git commit -m "Fiyat güncellemesi $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git pull --rebase --autostash || true
           git push
