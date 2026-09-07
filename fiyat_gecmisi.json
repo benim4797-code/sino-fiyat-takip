@@ -117,10 +117,14 @@
    [
     "2026-09-07 06:02",
     2499.0
+   ],
+   [
+    "2026-09-07 09:03",
+    2499.0
    ]
   ],
   "son_fiyat": 2499.0,
-  "son_kontrol": "2026-09-07 06:02",
+  "son_kontrol": "2026-09-07 09:03",
   "en_dusuk": 1999.2
  },
  "https://www.karaca.com/urun/karaca-home-uniq-100-pamuk-cift-kisilik-saten-nevresim-takimi-terracota": {
@@ -145,10 +149,14 @@
    [
     "2026-09-07 06:02",
     2799.0
+   ],
+   [
+    "2026-09-07 09:03",
+    2799.0
    ]
   ],
   "son_fiyat": 2799.0,
-  "son_kontrol": "2026-09-07 06:02",
+  "son_kontrol": "2026-09-07 09:03",
   "en_dusuk": 2799.0
  },
  "https://www.karaca.com/urun/karaca-stream-bone-saturn-53-parca-12-kisilik-yemek-takimi-platin": {
@@ -173,10 +181,14 @@
    [
     "2026-09-07 06:02",
     19999.0
+   ],
+   [
+    "2026-09-07 09:03",
+    19999.0
    ]
   ],
   "son_fiyat": 19999.0,
-  "son_kontrol": "2026-09-07 06:02",
+  "son_kontrol": "2026-09-07 09:03",
   "en_dusuk": 19999.0
  },
  "https://www.dyson.com.tr/v12-detect-slim-absolute-kablosuz-supurge": {
@@ -201,10 +213,14 @@
    [
     "2026-09-07 06:02",
     34999.0
+   ],
+   [
+    "2026-09-07 09:03",
+    34999.0
    ]
   ],
   "son_fiyat": 34999.0,
-  "son_kontrol": "2026-09-07 06:02",
+  "son_kontrol": "2026-09-07 09:03",
   "en_dusuk": 34999.0
  },
  "https://www.dyson.com.tr/v16-piston-animal-mat-siyah-bakir": {
@@ -229,10 +245,14 @@
    [
     "2026-09-07 06:02",
     45999.0
+   ],
+   [
+    "2026-09-07 09:03",
+    45999.0
    ]
   ],
   "son_fiyat": 45999.0,
-  "son_kontrol": "2026-09-07 06:02",
+  "son_kontrol": "2026-09-07 09:03",
   "en_dusuk": 45999.0
  },
  "https://www.gallerycrystal.com.tr/neoflam-perfect-seal-8-parca-cam-saklama-kabi-bej-9176": {
@@ -257,10 +277,14 @@
    [
     "2026-09-07 06:02",
     3552.0
+   ],
+   [
+    "2026-09-07 09:03",
+    3552.0
    ]
   ],
   "son_fiyat": 3552.0,
-  "son_kontrol": "2026-09-07 06:02",
+  "son_kontrol": "2026-09-07 09:03",
   "en_dusuk": 3552.0
  }
 }
