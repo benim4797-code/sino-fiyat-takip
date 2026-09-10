@@ -209,10 +209,14 @@
    [
     "2026-09-10 03:04",
     2499.0
+   ],
+   [
+    "2026-09-10 06:02",
+    2499.0
    ]
   ],
   "son_fiyat": 2499.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 1999.2
  },
  "https://www.karaca.com/urun/karaca-home-uniq-100-pamuk-cift-kisilik-saten-nevresim-takimi-terracota": {
@@ -329,10 +333,14 @@
    [
     "2026-09-10 03:04",
     2799.0
+   ],
+   [
+    "2026-09-10 06:02",
+    2799.0
    ]
   ],
   "son_fiyat": 2799.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 2799.0
  },
  "https://www.karaca.com/urun/karaca-stream-bone-saturn-53-parca-12-kisilik-yemek-takimi-platin": {
@@ -449,10 +457,14 @@
    [
     "2026-09-10 03:04",
     19999.0
+   ],
+   [
+    "2026-09-10 06:02",
+    19999.0
    ]
   ],
   "son_fiyat": 19999.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 19999.0
  },
  "https://www.dyson.com.tr/v12-detect-slim-absolute-kablosuz-supurge": {
@@ -569,10 +581,14 @@
    [
     "2026-09-10 03:04",
     35999.0
+   ],
+   [
+    "2026-09-10 06:02",
+    35999.0
    ]
   ],
   "son_fiyat": 35999.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 34999.0
  },
  "https://www.dyson.com.tr/v16-piston-animal-mat-siyah-bakir": {
@@ -689,10 +705,14 @@
    [
     "2026-09-10 03:04",
     47999.0
+   ],
+   [
+    "2026-09-10 06:02",
+    47999.0
    ]
   ],
   "son_fiyat": 47999.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 45999.0
  },
  "https://www.gallerycrystal.com.tr/neoflam-perfect-seal-8-parca-cam-saklama-kabi-bej-9176": {
@@ -809,16 +829,20 @@
    [
     "2026-09-10 03:04",
     3552.0
+   ],
+   [
+    "2026-09-10 06:02",
+    3552.0
    ]
   ],
   "son_fiyat": 3552.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 3552.0
  },
  "https://amzn.eu/d/06nq3ZlF": {
   "ad": "buhar kazanlı ütü",
   "gecmis": [],
-  "son_hata": "2026-09-10 03:04 - fiyat okunamadi"
+  "son_hata": "2026-09-10 06:02 - fiyat okunamadi"
  },
  "https://amzn.eu/d/0cfl0qY8": {
   "ad": "Normal ütü",
@@ -831,7 +855,7 @@
   "son_fiyat": 5.0,
   "son_kontrol": "2026-09-09 09:03",
   "en_dusuk": 5.0,
-  "son_hata": "2026-09-10 03:04 - fiyat okunamadi"
+  "son_hata": "2026-09-10 06:02 - fiyat okunamadi"
  },
  "https://www.karaca.com/urun/karaca-home-hilary-cicek-nakisli-cift-kisilik-pike-yatak-ortusu-takimi-pudra": {
   "ad": "Pike",
@@ -875,10 +899,14 @@
    [
     "2026-09-10 03:04",
     2499.0
+   ],
+   [
+    "2026-09-10 06:02",
+    2499.0
    ]
   ],
   "son_fiyat": 2499.0,
-  "son_kontrol": "2026-09-10 03:04",
+  "son_kontrol": "2026-09-10 06:02",
   "en_dusuk": 2499.0
  }
 }
