@@ -267,6 +267,23 @@ def main():
     eklenenler, silinenler, atlananlar = [], [], 0
     son_id = durum.get("offset", 0)
 
+    # Tam adi eksik olan eski kayitlari once tamamla ki /liste dogru gostersin
+    tamamlanan = 0
+    for satir in urunler:
+        if tamamlanan >= 10:
+            break
+        if len(satir) > 3 and satir[3].strip():
+            continue
+        tam = sayfa_basligi_al(satir[1])
+        tamamlanan += 1
+        if tam:
+            satir[3] = tam
+            print(f"Tam ad eklendi: {satir[0]} -> {tam}")
+        else:
+            satir[3] = satir[0]
+            print(f"Tam ad alinamadi, kisa ad kullanilacak: {satir[0]}")
+        time.sleep(1.5)
+
     for guncelleme in guncellemeler:
         son_id = max(son_id, guncelleme.get("update_id", 0) + 1)
         mesaj = guncelleme.get("message") or guncelleme.get("channel_post")
@@ -331,22 +348,6 @@ def main():
         urunler.append([ad, link, hedef, tam_ad])
         mevcut_linkler.add(link)
         eklenenler.append((ad, hedef, tam_ad or ad))
-
-    # Eski kayitlarda tam ad yoksa, her calismada birkacini tamamla
-    tamamlanan = 0
-    for satir in urunler:
-        if tamamlanan >= 5:
-            break
-        if len(satir) > 3 and satir[3].strip():
-            continue
-        tam = sayfa_basligi_al(satir[1])
-        tamamlanan += 1
-        if tam:
-            satir[3] = tam
-            print(f"Tam ad eklendi: {satir[0]} -> {tam}")
-        else:
-            satir[3] = satir[0]
-        time.sleep(1.5)
 
     durum["offset"] = son_id
     durum_yaz(durum)
