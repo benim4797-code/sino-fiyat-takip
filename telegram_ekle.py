@@ -9,11 +9,16 @@ Desteklenen kullanim (gruba yazilir):
     https://site.com/urun                 -> linki ekler, adi linkten uretir
     nevresim https://site.com/urun        -> "nevresim" adiyla ekler
     buzdolabi 25000 https://site.com/x    -> hedef fiyat 25000 olarak ekler
+    (tek mesajda alt alta en fazla 5 link gonderilebilir)
     /liste                                -> takip edilen urunleri listeler
     /sil 3                                -> 3 numarali urunu siler
+
+Akakce arama baglantisi, linkin kendi icindeki urun adindan uretilir.
+Sayfa indirilmez; bu yuzden bot korumasi olan sitelerde de calisir.
 """
 
 import csv
+import html as html_mod
 import json
 import os
 import re
@@ -29,38 +34,52 @@ TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 SOHBET = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 LINK_DESENI = re.compile(r"https?://\S+")
-# Ad uretirken atilacak ekler
-GURULTU = {
-    "urun", "product", "p", "dp", "detay", "detail", "html", "htm",
-    "aspx", "php", "tr", "www",
+
+# URL yolunda urun adi tasimayan parcalar
+YOL_GURULTUSU = {
+    "urun", "urunler", "product", "products", "p", "dp", "gp", "detay",
+    "detail", "item", "items", "tr", "www", "shop", "magaza", "pd", "c",
 }
+# Urun adinda ise yaramayan kelimeler
+KELIME_GURULTUSU = {"p", "dp", "urun", "product", "html", "htm", "aspx", "php"}
+
+# HBCV00004ABCDE / B08XYZ1234 gibi stok kodlari
+URUN_KODU = re.compile(r"^(?=.*\d)[A-Za-z0-9]{8,}$")
+
+MAKS_KELIME = 10
+MAKS_LINK = 5          # tek mesajda islenecek en fazla link sayisi
 
 
+# ----------------------------------------------------------------------------
+# Telegram
+# ----------------------------------------------------------------------------
 def api(metot, veri=None):
     url = f"https://api.telegram.org/bot{TOKEN}/{metot}"
     gonderi = urllib.parse.urlencode(veri).encode() if veri else None
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, data=gonderi), timeout=25) as y:
+        with urllib.request.urlopen(
+                urllib.request.Request(url, data=gonderi), timeout=25) as y:
             return json.loads(y.read().decode())
     except Exception as hata:
         print(f"!! Telegram API hatasi ({metot}): {hata}")
         return {"ok": False}
 
 
+def kacir(metin):
+    """Telegram HTML modunda guvenli olmasi icin & < > karakterlerini kacirir."""
+    return html_mod.escape(str(metin), quote=False)
+
+
 def cevap_yaz(metin):
-    api("sendMessage", {
+    yanit = api("sendMessage", {
         "chat_id": SOHBET,
-        "text": metin,
+        "text": metin[:4000],
         "parse_mode": "HTML",
         "disable_web_page_preview": "true",
     })
-
-
-def akakce_arama(ad):
-    """Urun adindan Akakce arama baglantisi uretir."""
-    sorgu = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ]", " ", ad)
-    sorgu = re.sub(r"\s+", " ", sorgu).strip()
-    return "https://www.akakce.com/arama/?q=" + urllib.parse.quote_plus(sorgu)
+    if not yanit.get("ok"):
+        print(f"!! Mesaj gonderilemedi: {yanit}")
+    return yanit.get("ok", False)
 
 
 def parcali_gonder(satirlar, baslik):
@@ -69,7 +88,8 @@ def parcali_gonder(satirlar, baslik):
         return
     tampon = baslik
     for satir in satirlar:
-        if len(tampon) + len(satir) > 3600:
+        satir = satir[:1200]
+        if len(tampon) + len(satir) > 3500:
             cevap_yaz(tampon)
             tampon = ""
         tampon += satir
@@ -77,73 +97,150 @@ def parcali_gonder(satirlar, baslik):
         cevap_yaz(tampon)
 
 
-def linkten_ad_uret(link):
-    """URL'nin son parcasindan okunabilir bir ad cikarir."""
+# ----------------------------------------------------------------------------
+# Linkten urun adi cikarma
+# ----------------------------------------------------------------------------
+def _yol_parcalari(link):
     try:
-        yol = urllib.parse.urlparse(link).path.strip("/")
+        yol = urllib.parse.urlparse(link).path
     except ValueError:
-        return "urun"
+        return []
+    yol = urllib.parse.unquote(yol)          # %C3%A7 -> ç
+    return [p for p in yol.split("/") if p]
 
-    parcalar = [p for p in yol.split("/") if p]
-    # En uzun ve anlamli parcayi sec
-    aday = ""
-    for parca in parcalar:
-        temiz = re.sub(r"\.(html?|aspx|php)$", "", parca)
-        if temiz.lower() in GURULTU or temiz.isdigit():
+
+def _kelimeleri_ayikla(parca):
+    """
+    Bir URL parcasini temiz kelime listesine cevirir.
+    Model numaralari korunur (Arcelik 270561), sondaki kayit numaralari atilir
+    (... -p-12345678).
+    """
+    parca = re.sub(r"\.(html?|aspx|php)$", "", parca, flags=re.IGNORECASE)
+    ham = [k.strip() for k in re.split(r"[-_+.]+", parca) if k.strip()]
+
+    kelimeler = []
+    for sira, kelime in enumerate(ham):
+        son_mu = (sira == len(ham) - 1)
+
+        if kelime.lower() in KELIME_GURULTUSU:
             continue
-        if len(temiz) > len(aday):
-            aday = temiz
-
-    if not aday:
-        alan = urllib.parse.urlparse(link).netloc.replace("www.", "")
-        return alan or "urun"
-
-    ad = re.sub(r"[-_]+", " ", aday)
-    ad = re.sub(r"\s+", " ", ad).strip()
-    ad = re.sub(r"\b[pP]?\d{5,}\b", "", ad).strip()  # uzun urun kodlarini at
-
-    if len(ad) > 45:
-        kesik = ad[:45].rsplit(" ", 1)[0]
-        ad = kesik if len(kesik) > 15 else ad[:45]
-
-    return ad or "urun"
+        if len(kelime) == 1 and not kelime.isdigit():
+            continue                          # "-p-" gibi ayiraclar
+        if kelime.isdigit():
+            # Sondaki uzun sayi = urun kayit numarasi, at.
+            # Ortadaki sayi = model numarasi, tut (Arcelik 270561).
+            if (son_mu and len(kelime) >= 4) or len(kelime) >= 9:
+                continue
+        if URUN_KODU.match(kelime) and not re.search(r"[çğıöşüÇĞİÖŞÜ]", kelime):
+            continue                          # HBCV0000..., B08XYZ1234
+        kelimeler.append(kelime)
+    return kelimeler
 
 
-def mesaji_coz(metin):
-    """Mesajdan (ad, link, hedef) uclusunu cikarir. Link yoksa None doner."""
-    eslesme = LINK_DESENI.search(metin)
-    if not eslesme:
+def linkten_urun_adi(link):
+    """
+    Linkin icindeki urun adini cikarir. Ornek:
+      .../urun/karaca-home-sunflower-cift-kisilik-pike-takimi
+      -> "karaca home sunflower cift kisilik pike takimi"
+    Anlamli bir ad cikmazsa None doner.
+    """
+    parcalar = _yol_parcalari(link)
+    en_iyi, en_iyi_sira = [], -1
+    for sira, parca in enumerate(parcalar):
+        if parca.lower() in YOL_GURULTUSU:
+            continue
+        kelimeler = _kelimeleri_ayikla(parca)
+        if len(kelimeler) > len(en_iyi):
+            en_iyi, en_iyi_sira = kelimeler, sira
+
+    if len(en_iyi) < 2:
         return None
 
-    link = eslesme.group(0).rstrip(".,;)")
-    kalan = (metin[:eslesme.start()] + " " + metin[eslesme.end():]).strip()
+    # Marka cogu sitede bir onceki yol parcasinda durur (trendyol.com/tac/...).
+    # Kisa ve gurultu olmayan bir onceki parcayi basa ekle.
+    if en_iyi_sira > 0:
+        onceki = parcalar[en_iyi_sira - 1]
+        if onceki.lower() not in YOL_GURULTUSU:
+            onceki_kelimeler = _kelimeleri_ayikla(onceki)
+            if 1 <= len(onceki_kelimeler) <= 2:
+                mevcut = {k.lower() for k in en_iyi}
+                yeni = [k for k in onceki_kelimeler if k.lower() not in mevcut]
+                en_iyi = yeni + en_iyi
 
-    # Komut on ekini temizle
-    kalan = re.sub(r"^/\w+(@\w+)?\s*", "", kalan).strip()
+    ad = " ".join(en_iyi[:MAKS_KELIME])
+    ad = re.sub(r"\s+", " ", ad).strip()
+    return ad if len(ad) >= 8 else None
 
-    # Kalan metindeki tek basina duran sayi -> hedef fiyat
+
+def arama_terimi(ad, link):
+    """Akakce'de aranacak metin: once linkteki urun adi, olmazsa kisa ad."""
+    return linkten_urun_adi(link) or ad
+
+
+def akakce_arama(terim):
+    sorgu = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ]", " ", terim)
+    sorgu = re.sub(r"\s+", " ", sorgu).strip()
+    return "https://www.akakce.com/arama/?q=" + urllib.parse.quote_plus(sorgu)
+
+
+# ----------------------------------------------------------------------------
+# Mesaj cozumleme
+# ----------------------------------------------------------------------------
+def mesaji_coz(metin):
+    """
+    Mesajdaki her link icin (ad, link, hedef) uretir.
+    Yazilan etiket yalnizca ilk linke uygulanir; digerlerinin adi kendi
+    linkinden cikarilir. Link yoksa bos liste doner.
+    """
+    eslesmeler = list(LINK_DESENI.finditer(metin))[:MAKS_LINK]
+    if not eslesmeler:
+        return []
+
+    # Etiket ve hedef fiyat, linklerin disinda kalan metinden okunur
+    kalan = metin[:eslesmeler[0].start()] + " " + metin[eslesmeler[-1].end():]
+    kalan = re.sub(r"^\s*/\w+(@\w+)?\s*", "", kalan.strip()).strip()
+
     hedef = ""
     sayilar = re.findall(r"\b\d{2,7}\b", kalan)
     if sayilar:
         hedef = sayilar[-1]
         kalan = re.sub(r"\b" + re.escape(hedef) + r"\b", "", kalan).strip()
 
-    ad = re.sub(r"\s+", " ", kalan).strip(" -–—:")
-    if not ad:
-        ad = linkten_ad_uret(link)
+    etiket = re.sub(r"\s+", " ", kalan).strip(" -–—:")[:80]
 
-    return ad, link, hedef
+    sonuclar = []
+    for sira, eslesme in enumerate(eslesmeler):
+        link = eslesme.group(0).rstrip(".,;)]")
+        if sira == 0 and etiket:
+            ad = etiket
+        else:
+            ad = (linkten_urun_adi(link)
+                  or urllib.parse.urlparse(link).netloc or "ürün")[:80]
+        sonuclar.append((ad, link, hedef if sira == 0 else ""))
+    return sonuclar
 
 
+# ----------------------------------------------------------------------------
+# Dosya islemleri
+# ----------------------------------------------------------------------------
 def urunleri_oku():
+    """Her satiri [ad, link, hedef] olarak dondurur."""
     if not URUNLER_DOSYASI.exists():
         return []
     with open(URUNLER_DOSYASI, encoding="utf-8-sig", newline="") as dosya:
-        return [s for s in csv.reader(dosya) if s and len(s) >= 2][1:]
+        satirlar = [s for s in csv.reader(dosya) if s and len(s) >= 2]
+    if satirlar and satirlar[0][0].strip().lower() == "ad":
+        satirlar = satirlar[1:]
+    temiz = []
+    for s in satirlar:
+        s = (s + ["", "", ""])[:3]
+        if s[1].strip().startswith("http"):
+            temiz.append([s[0].strip(), s[1].strip(), s[2].strip()])
+    return temiz
 
 
 def urunleri_yaz(satirlar):
-    with open(URUNLER_DOSYASI, "w", encoding="utf-8", newline="") as dosya:
+    with open(URUNLER_DOSYASI, "w", encoding="utf-8-sig", newline="") as dosya:
         yazici = csv.writer(dosya)
         yazici.writerow(["ad", "link", "hedef_fiyat"])
         for satir in satirlar:
@@ -153,14 +250,33 @@ def urunleri_yaz(satirlar):
 def durum_oku():
     if DURUM_DOSYASI.exists():
         try:
-            return json.loads(DURUM_DOSYASI.read_text(encoding="utf-8"))
+            veri = json.loads(DURUM_DOSYASI.read_text(encoding="utf-8"))
+            if isinstance(veri, dict):
+                return veri
         except json.JSONDecodeError:
             pass
     return {"offset": 0}
 
 
 def durum_yaz(durum):
-    DURUM_DOSYASI.write_text(json.dumps(durum), encoding="utf-8")
+    DURUM_DOSYASI.write_text(json.dumps({"offset": durum.get("offset", 0)}),
+                             encoding="utf-8")
+
+
+# ----------------------------------------------------------------------------
+# Ana akis
+# ----------------------------------------------------------------------------
+def urun_satiri(sira, satir):
+    """Liste mesajindaki tek bir urun blogunu olusturur."""
+    ad, link, hedef = satir[0], satir[1], satir[2]
+    terim = arama_terimi(ad, link)
+    hedef_not = f" — hedef {kacir(hedef)} TL" if hedef else ""
+    return (
+        f"\n<b>{sira}.</b> {kacir(ad)}{hedef_not}\n"
+        f"<i>{kacir(terim)}</i>\n"
+        f"<a href=\"{kacir(link)}\">Ürün</a> · "
+        f"<a href=\"{kacir(akakce_arama(terim))}\">Akakçe'de ara</a>\n"
+    )
 
 
 def main():
@@ -179,7 +295,7 @@ def main():
         return
 
     urunler = urunleri_oku()
-    mevcut_linkler = {s[1].strip() for s in urunler if len(s) > 1}
+    mevcut_linkler = {s[1] for s in urunler}
     eklenenler, silinenler, atlananlar = [], [], 0
     son_id = durum.get("offset", 0)
 
@@ -197,25 +313,16 @@ def main():
 
         komut = metin.split()[0].split("@")[0].lower()
 
-        # /liste
         if komut == "/liste":
             if not urunler:
-                cevap_yaz("Takip listesi boş.")
+                cevap_yaz("Takip listesi boş. Bir ürün linki göndererek başlayın.")
             else:
-                satirlar = []
-                for i, s in enumerate(urunler, 1):
-                    hedef_not = f" — hedef {s[2]} TL" if len(s) > 2 and s[2] else ""
-                    satirlar.append(
-                        f"\n<b>{i}.</b> {s[0]}{hedef_not}\n"
-                        f"<a href=\"{s[1]}\">Ürün</a> · "
-                        f"<a href=\"{akakce_arama(s[0])}\">Akakçe'de ara</a>\n"
-                    )
                 parcali_gonder(
-                    satirlar, f"📋 <b>Takip edilen {len(urunler)} ürün</b>\n"
+                    [urun_satiri(i, s) for i, s in enumerate(urunler, 1)],
+                    f"📋 <b>Takip edilen {len(urunler)} ürün</b>\n",
                 )
             continue
 
-        # /sil <numara>
         if komut == "/sil":
             parcalar = metin.split()
             if len(parcalar) < 2 or not parcalar[1].isdigit():
@@ -225,24 +332,19 @@ def main():
             if 1 <= sira <= len(urunler):
                 cikarilan = urunler.pop(sira - 1)
                 silinenler.append(cikarilan[0])
-                mevcut_linkler.discard(cikarilan[1].strip())
+                mevcut_linkler.discard(cikarilan[1])
             else:
                 cevap_yaz(f"{sira} numaralı ürün yok. /liste ile bakabilirsiniz.")
             continue
 
-        # Link iceren mesaj
-        cozum = mesaji_coz(metin)
-        if not cozum:
-            continue
-
-        ad, link, hedef = cozum
-        if link in mevcut_linkler:
-            atlananlar += 1
-            continue
-
-        urunler.append([ad, link, hedef])
-        mevcut_linkler.add(link)
-        eklenenler.append((ad, hedef))
+        for ad, link, hedef in mesaji_coz(metin):
+            if link in mevcut_linkler:
+                atlananlar += 1
+                continue
+            urunler.append([ad, link, hedef])
+            mevcut_linkler.add(link)
+            eklenenler.append([ad, link, hedef])
+            print(f"Eklendi: {ad} -> {arama_terimi(ad, link)}")
 
     durum["offset"] = son_id
     durum_yaz(durum)
@@ -250,17 +352,21 @@ def main():
     if eklenenler or silinenler:
         urunleri_yaz(urunler)
 
-    # Onay mesaji
     if eklenenler:
-        satirlar = [
-            f"\n• <b>{ad}</b>" + (f" (hedef {hedef} TL)" if hedef else "")
-            + f"\n  <a href=\"{akakce_arama(ad)}\">Akakçe'de ara</a>\n"
-            for ad, hedef in eklenenler
-        ]
+        satirlar = []
+        for satir in eklenenler:
+            terim = arama_terimi(satir[0], satir[1])
+            hedef_not = f" (hedef {kacir(satir[2])} TL)" if satir[2] else ""
+            satirlar.append(
+                f"\n• <b>{kacir(satir[0])}</b>{hedef_not}\n"
+                f"<i>{kacir(terim)}</i>\n"
+                f"<a href=\"{kacir(akakce_arama(terim))}\">Akakçe'de ara</a>\n"
+            )
         satirlar.append(f"\nToplam {len(urunler)} ürün takipte.")
         parcali_gonder(satirlar, f"✅ <b>{len(eklenenler)} ürün eklendi</b>\n")
+
     if silinenler:
-        cevap_yaz("🗑 Silindi: " + ", ".join(silinenler))
+        cevap_yaz("🗑 Silindi: " + kacir(", ".join(silinenler)))
     if atlananlar:
         cevap_yaz(f"ℹ️ {atlananlar} link zaten listede olduğu için atlandı.")
 
