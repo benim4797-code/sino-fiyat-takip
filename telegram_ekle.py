@@ -56,6 +56,27 @@ def cevap_yaz(metin):
     })
 
 
+def akakce_arama(ad):
+    """Urun adindan Akakce arama baglantisi uretir."""
+    sorgu = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ]", " ", ad)
+    sorgu = re.sub(r"\s+", " ", sorgu).strip()
+    return "https://www.akakce.com/arama/?q=" + urllib.parse.quote_plus(sorgu)
+
+
+def parcali_gonder(satirlar, baslik):
+    """Telegram 4096 karakter sinirini asmadan parcalar halinde gonderir."""
+    if not satirlar:
+        return
+    tampon = baslik
+    for satir in satirlar:
+        if len(tampon) + len(satir) > 3600:
+            cevap_yaz(tampon)
+            tampon = ""
+        tampon += satir
+    if tampon.strip():
+        cevap_yaz(tampon)
+
+
 def linkten_ad_uret(link):
     """URL'nin son parcasindan okunabilir bir ad cikarir."""
     try:
@@ -181,12 +202,17 @@ def main():
             if not urunler:
                 cevap_yaz("Takip listesi boş.")
             else:
-                satirlar = [
-                    f"{i}. {s[0]}" + (f" — hedef {s[2]} TL" if len(s) > 2 and s[2] else "")
-                    for i, s in enumerate(urunler, 1)
-                ]
-                cevap_yaz(f"📋 <b>Takip edilen {len(urunler)} ürün</b>\n\n"
-                          + "\n".join(satirlar[:80]))
+                satirlar = []
+                for i, s in enumerate(urunler, 1):
+                    hedef_not = f" — hedef {s[2]} TL" if len(s) > 2 and s[2] else ""
+                    satirlar.append(
+                        f"\n<b>{i}.</b> {s[0]}{hedef_not}\n"
+                        f"<a href=\"{s[1]}\">Ürün</a> · "
+                        f"<a href=\"{akakce_arama(s[0])}\">Akakçe'de ara</a>\n"
+                    )
+                parcali_gonder(
+                    satirlar, f"📋 <b>Takip edilen {len(urunler)} ürün</b>\n"
+                )
             continue
 
         # /sil <numara>
@@ -227,11 +253,12 @@ def main():
     # Onay mesaji
     if eklenenler:
         satirlar = [
-            f"• {ad}" + (f" (hedef {hedef} TL)" if hedef else "")
+            f"\n• <b>{ad}</b>" + (f" (hedef {hedef} TL)" if hedef else "")
+            + f"\n  <a href=\"{akakce_arama(ad)}\">Akakçe'de ara</a>\n"
             for ad, hedef in eklenenler
         ]
-        cevap_yaz(f"✅ <b>{len(eklenenler)} ürün eklendi</b>\n\n" + "\n".join(satirlar)
-                  + f"\n\nToplam {len(urunler)} ürün takipte.")
+        satirlar.append(f"\nToplam {len(urunler)} ürün takipte.")
+        parcali_gonder(satirlar, f"✅ <b>{len(eklenenler)} ürün eklendi</b>\n")
     if silinenler:
         cevap_yaz("🗑 Silindi: " + ", ".join(silinenler))
     if atlananlar:
