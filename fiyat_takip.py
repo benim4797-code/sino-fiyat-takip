@@ -267,21 +267,36 @@ def main():
     eklenenler, silinenler, atlananlar = [], [], 0
     son_id = durum.get("offset", 0)
 
-    # Tam adi eksik olan eski kayitlari once tamamla ki /liste dogru gostersin
+    # Tam adi eksik olan kayitlari once tamamla ki /liste dogru gostersin.
+    # Basarisiz denemeler sayilir; 3 denemeden sonra kisa ad kalici olur.
+    denemeler = durum.setdefault("basarisiz", {})
     tamamlanan = 0
     for satir in urunler:
         if tamamlanan >= 10:
             break
         if len(satir) > 3 and satir[3].strip():
             continue
+        if denemeler.get(satir[1], 0) >= 3:
+            continue
+
         tam = sayfa_basligi_al(satir[1])
         tamamlanan += 1
         if tam:
             satir[3] = tam
+            denemeler.pop(satir[1], None)
             print(f"Tam ad eklendi: {satir[0]} -> {tam}")
         else:
-            satir[3] = satir[0]
-            print(f"Tam ad alinamadi, kisa ad kullanilacak: {satir[0]}")
+            sayac = denemeler.get(satir[1], 0) + 1
+            denemeler[satir[1]] = sayac
+            print(f"Tam ad alinamadi ({sayac}/3 deneme): {satir[0]}")
+            if sayac >= 3:
+                satir[3] = satir[0]
+                cevap_yaz(
+                    f"⚠️ <b>{satir[0]}</b> için ürün adı sayfadan okunamadı "
+                    f"(site engelliyor olabilir).\nAkakçe araması kısa adla "
+                    f"yapılacak. Daha isabetli sonuç için ürünü silip marka ve "
+                    f"model içeren bir adla tekrar ekleyebilirsiniz."
+                )
         time.sleep(1.5)
 
     for guncelleme in guncellemeler:
