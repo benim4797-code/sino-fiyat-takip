@@ -1,435 +1,376 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Fiyat Takip Botu
-----------------
-urunler.csv icindeki linkleri gezer, fiyatlari cikarir, fiyat_gecmisi.json'a
-kaydeder ve fiyat dustugunde Telegram'dan bildirim gonderir.
+Telegram Dinleyici
+------------------
+Telegram grubuna atilan linkleri okur ve urunler.csv dosyasina ekler.
 
-Kullanim:
-    python fiyat_takip.py            # normal calisma (bildirim gonderir)
-    python fiyat_takip.py --test     # bildirim gondermez, sadece fiyatlari yazar
-    python fiyat_takip.py --test 5   # sadece ilk 5 urunu dener
+Desteklenen kullanim (gruba yazilir):
+    https://site.com/urun                 -> linki ekler, adi linkten uretir
+    nevresim https://site.com/urun        -> "nevresim" adiyla ekler
+    buzdolabi 25000 https://site.com/x    -> hedef fiyat 25000 olarak ekler
+    /liste                                -> takip edilen urunleri listeler
+    /sil 3                                -> 3 numarali urunu siler
 """
 
 import csv
 import json
 import os
-import random
 import re
-import sys
 import time
-from datetime import datetime, timedelta, timezone
+import urllib.parse
+import urllib.request
 from pathlib import Path
-
-from bs4 import BeautifulSoup
-
-# curl_cffi varsa onu kullan (tarayici parmak izi taklidi -> bot korumasini asma sansi cok daha yuksek)
-try:
-    from curl_cffi import requests as _http
-    _IMPERSONATE = True
-except ImportError:  # pragma: no cover
-    import requests as _http
-    _IMPERSONATE = False
-
 
 KOK = Path(__file__).resolve().parent
 URUNLER_DOSYASI = KOK / "urunler.csv"
-GECMIS_DOSYASI = KOK / "fiyat_gecmisi.json"
+DURUM_DOSYASI = KOK / "telegram_durum.json"
 
-TR_SAAT = timezone(timedelta(hours=3))          # Europe/Istanbul
-GECMIS_LIMIT = 300                              # urun basina saklanacak kayit sayisi
-BEKLEME = (2.0, 4.5)                            # istekler arasi rastgele bekleme (saniye)
-ZAMAN_ASIMI = 30
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+SOHBET = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
-# Yuzde bazinda: bundan kucuk dususler "gurultu" sayilip bildirilmez.
-MIN_DUSUS_YUZDE = float(os.environ.get("MIN_DUSUS_YUZDE", "1.0"))
-
-BASLIKLAR = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cache-Control": "no-cache",
-    "Upgrade-Insecure-Requests": "1",
-}
-
-# Site bazli CSS secicileri. Once genel yontemler denenir, tutmazsa buraya bakilir.
-SITE_SECICILER = {
-    "trendyol.com": [".prc-dsc", ".prc-slg", ".product-price-container .prc-dsc"],
-    "hepsiburada.com": [
-        '[data-test-id="price-current-price"]',
-        "#offering-price",
-        '[data-test-id="default-price"]',
-    ],
-    "n11.com": [".newPrice ins", ".priceContainer .newPrice", "#unf-p-id ins"],
-    "amazon.com.tr": [
-        "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
-        "#corePrice_feature_div .a-price .a-offscreen",
-        ".a-price .a-offscreen",
-    ],
-    "ikea.com.tr": [".pip-temp-price__integer", ".pip-price__integer"],
-    "koctas.com.tr": [".price-new", ".product-price"],
-    "vatanbilgisayar.com": [".product-list__price", ".price"],
-    "mediamarkt.com.tr": ['[data-test="branded-price-whole-value"]'],
-    "ciceksepeti.com": [".product-price__new-price", "#priceNew"],
-    "boyner.com.tr": [".product-price .discount-price", ".price-item"],
-    "lcw.com": [".price-area .price", ".product-price"],
-    "englishhome.com": [".product-price .price", ".prc-last"],
-    "madamecoco.com": [".product-price .price", ".prc-last"],
+LINK_DESENI = re.compile(r"https?://\S+")
+# Ad uretirken atilacak ekler
+GURULTU = {
+    "urun", "product", "p", "dp", "detay", "detail", "html", "htm",
+    "aspx", "php", "tr", "www",
 }
 
 
-# ----------------------------------------------------------------------------
-# Fiyat metnini sayiya cevirme
-# ----------------------------------------------------------------------------
-def metni_fiyata_cevir(metin):
-    """'1.299,90 TL' -> 1299.9   |   '2,499.00' -> 2499.0   |   '899' -> 899.0"""
-    if metin is None:
-        return None
-    metin = str(metin).strip()
-    if not metin:
-        return None
-
-    # Sadece rakam, nokta ve virgulleri birak
-    metin = metin.replace("\xa0", " ")
-    eslesme = re.search(r"\d[\d.,\s]*\d|\d", metin)
-    if not eslesme:
-        return None
-    ham = eslesme.group(0).replace(" ", "")
-
-    nokta = ham.rfind(".")
-    virgul = ham.rfind(",")
-
-    if nokta != -1 and virgul != -1:
-        # Sonda gelen ondalik ayiracidir
-        if virgul > nokta:
-            ham = ham.replace(".", "").replace(",", ".")
-        else:
-            ham = ham.replace(",", "")
-    elif virgul != -1:
-        sag = len(ham) - virgul - 1
-        # 1.234,56 -> ondalik   |   1,234 -> binlik
-        ham = ham.replace(",", "." if sag <= 2 else "")
-    elif nokta != -1:
-        sag = len(ham) - nokta - 1
-        if sag == 3 and len(ham.replace(".", "")) > 3:
-            # 1.299 gibi -> binlik ayiraci
-            ham = ham.replace(".", "")
-        # aksi halde zaten ondalik (1299.90)
-
+def api(metot, veri=None):
+    url = f"https://api.telegram.org/bot{TOKEN}/{metot}"
+    gonderi = urllib.parse.urlencode(veri).encode() if veri else None
     try:
-        deger = float(ham)
-    except ValueError:
-        return None
-
-    if deger <= 0 or deger > 10_000_000:
-        return None
-    return round(deger, 2)
+        with urllib.request.urlopen(urllib.request.Request(url, data=gonderi), timeout=25) as y:
+            return json.loads(y.read().decode())
+    except Exception as hata:
+        print(f"!! Telegram API hatasi ({metot}): {hata}")
+        return {"ok": False}
 
 
-def _jsonld_fiyat_bul(veri):
-    """JSON-LD icinde ic ice gecmis offers/price alanlarini arar."""
-    if isinstance(veri, list):
-        for parca in veri:
-            sonuc = _jsonld_fiyat_bul(parca)
-            if sonuc:
-                return sonuc
-        return None
-
-    if not isinstance(veri, dict):
-        return None
-
-    for anahtar in ("price", "lowPrice", "highPrice"):
-        if anahtar in veri:
-            fiyat = metni_fiyata_cevir(veri[anahtar])
-            if fiyat:
-                return fiyat
-
-    for anahtar in ("offers", "@graph", "hasVariant", "itemOffered", "mainEntity"):
-        if anahtar in veri:
-            sonuc = _jsonld_fiyat_bul(veri[anahtar])
-            if sonuc:
-                return sonuc
-    return None
-
-
-def fiyat_ayikla(html, url):
-    """Coklu yontemle fiyati cikarmayi dener. Basarisizsa None doner."""
-    corba = BeautifulSoup(html, "html.parser")
-
-    # 1) JSON-LD structured data -- en guvenilir yontem, cogu sitede var
-    for etiket in corba.find_all("script", type="application/ld+json"):
-        try:
-            veri = json.loads(etiket.string or etiket.get_text() or "{}")
-        except (json.JSONDecodeError, TypeError):
-            continue
-        fiyat = _jsonld_fiyat_bul(veri)
-        if fiyat:
-            return fiyat, "json-ld"
-
-    # 2) Meta etiketleri
-    meta_adlari = [
-        ("property", "product:price:amount"),
-        ("property", "og:price:amount"),
-        ("itemprop", "price"),
-        ("name", "twitter:data1"),
-    ]
-    for nitelik, deger in meta_adlari:
-        etiket = corba.find("meta", attrs={nitelik: deger})
-        if etiket and etiket.get("content"):
-            fiyat = metni_fiyata_cevir(etiket["content"])
-            if fiyat:
-                return fiyat, f"meta:{deger}"
-
-    # 3) itemprop="price" iceren herhangi bir eleman
-    etiket = corba.find(attrs={"itemprop": "price"})
-    if etiket:
-        fiyat = metni_fiyata_cevir(etiket.get("content") or etiket.get_text())
-        if fiyat:
-            return fiyat, "itemprop"
-
-    # 4) Siteye ozel CSS secicileri
-    for alan, seciciler in SITE_SECICILER.items():
-        if alan in url:
-            for secici in seciciler:
-                bulunan = corba.select_one(secici)
-                if bulunan:
-                    fiyat = metni_fiyata_cevir(bulunan.get_text())
-                    if fiyat:
-                        return fiyat, f"secici:{secici}"
-
-    # 5) Son care: "price" gecen class'lardaki TL ifadeleri
-    adaylar = []
-    for eleman in corba.select('[class*="price"], [class*="Price"], [class*="prc"], [id*="price"]'):
-        metin = eleman.get_text(" ", strip=True)
-        if len(metin) > 40:
-            continue
-        if re.search(r"(TL|₺)", metin):
-            fiyat = metni_fiyata_cevir(metin)
-            if fiyat:
-                adaylar.append(fiyat)
-    if adaylar:
-        return min(adaylar), "tahmin"
-
-    return None, None
-
-
-# ----------------------------------------------------------------------------
-# Ag islemleri
-# ----------------------------------------------------------------------------
-def sayfayi_getir(url):
-    kwargs = {"headers": BASLIKLAR, "timeout": ZAMAN_ASIMI}
-    if _IMPERSONATE:
-        kwargs["impersonate"] = "chrome"
-    else:
-        kwargs["allow_redirects"] = True
-
-    yanit = _http.get(url, **kwargs)
-    if yanit.status_code != 200:
-        raise RuntimeError(f"HTTP {yanit.status_code}")
-    return yanit.text
-
-
-def telegram_gonder(mesaj):
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    sohbet = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not sohbet:
-        print("!! TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID tanimli degil, bildirim atlandi.")
-        return False
-
-    import urllib.parse
-    import urllib.request
-
-    veri = urllib.parse.urlencode({
-        "chat_id": sohbet,
-        "text": mesaj,
+def cevap_yaz(metin):
+    api("sendMessage", {
+        "chat_id": SOHBET,
+        "text": metin,
         "parse_mode": "HTML",
         "disable_web_page_preview": "true",
-    }).encode()
+    })
 
-    istek = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/sendMessage", data=veri
-    )
+
+SITE_EKLERI = re.compile(
+    r"\s*[|\-–—]\s*(karaca|hepsiburada|trendyol|n11|amazon|vatan|media ?markt|"
+    r"ikea|koçtaş|koctas|boyner|lc ?waikiki|english home|madame coco|"
+    r"çiçeksepeti|ciceksepeti|teknosa|migros|gratis)[\w\s.]*$",
+    re.IGNORECASE,
+)
+TANITIM_EKLERI = re.compile(
+    r"\s*[|\-–—,]?\s*(fiyat[ıi]?|fiyatlar[ıi]?|yorumlar[ıi]?|özellikleri|"
+    r"modelleri|en ucuz|satın al|online|indirimli|ücretsiz kargo|"
+    r"kampanyal[ıi] fiyat)[\w\s.,|–—-]*$",
+    re.IGNORECASE,
+)
+
+
+def sayfa_basligi_al(link):
+    """Urun sayfasindan gercek urun adini cekmeye calisir. Basarisizsa None."""
+    istek = urllib.request.Request(link, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/126.0.0.0 Safari/537.36"),
+        "Accept-Language": "tr-TR,tr;q=0.9",
+    })
     try:
         with urllib.request.urlopen(istek, timeout=20) as yanit:
-            return yanit.status == 200
+            ham = yanit.read(300_000)
+        html = ham.decode("utf-8", errors="ignore")
     except Exception as hata:
-        print(f"!! Telegram hatasi: {hata}")
-        return False
+        print(f"   basligi alinamadi: {hata}")
+        return None
+
+    baslik = None
+
+    # 1) og:title (en temiz kaynak)
+    eslesme = re.search(
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)', html, re.I)
+    if not eslesme:
+        eslesme = re.search(
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title', html, re.I)
+    if eslesme:
+        baslik = eslesme.group(1)
+
+    # 2) JSON-LD urun adi
+    if not baslik:
+        eslesme = re.search(r'"@type"\s*:\s*"Product".{0,400}?"name"\s*:\s*"([^"]{5,150})"',
+                            html, re.I | re.S)
+        if eslesme:
+            baslik = eslesme.group(1)
+
+    # 3) <title>
+    if not baslik:
+        eslesme = re.search(r"<title[^>]*>([^<]{5,200})</title>", html, re.I)
+        if eslesme:
+            baslik = eslesme.group(1)
+
+    if not baslik:
+        return None
+
+    for eski, yeni in (("&amp;", "&"), ("&quot;", '"'), ("&#39;", "'"),
+                       ("&apos;", "'"), ("&nbsp;", " "), ("&gt;", ">"), ("&lt;", "<")):
+        baslik = baslik.replace(eski, yeni)
+
+    # Amazon gibi siteler basliga kendi adini onek olarak koyuyor
+    baslik = re.sub(r"^(amazon\.com\.tr|amazon|hepsiburada|trendyol|n11)\s*[:|\-]\s*",
+                    "", baslik, flags=re.IGNORECASE)
+    baslik = SITE_EKLERI.sub("", baslik)
+    baslik = TANITIM_EKLERI.sub("", baslik)
+    baslik = re.sub(r"\s+", " ", baslik).strip(" -–—|,·")
+
+    # Arama icin ilk 10 kelime yeter, fazlasi sonucu daraltir
+    kelimeler = baslik.split()
+    if len(kelimeler) > 10:
+        baslik = " ".join(kelimeler[:10])
+
+    return baslik if len(baslik) >= 5 else None
 
 
-def mesajlari_bolerek_gonder(satirlar, baslik):
-    """Telegram 4096 karakter siniri icin mesaji parcalara boler."""
+def akakce_arama(ad):
+    """Urun adindan Akakce arama baglantisi uretir."""
+    sorgu = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ]", " ", ad)
+    sorgu = re.sub(r"\s+", " ", sorgu).strip()
+    return "https://www.akakce.com/arama/?q=" + urllib.parse.quote_plus(sorgu)
+
+
+def parcali_gonder(satirlar, baslik):
+    """Telegram 4096 karakter sinirini asmadan parcalar halinde gonderir."""
     if not satirlar:
         return
     tampon = baslik
     for satir in satirlar:
-        if len(tampon) + len(satir) > 3800:
-            telegram_gonder(tampon)
-            time.sleep(1)
+        if len(tampon) + len(satir) > 3600:
+            cevap_yaz(tampon)
             tampon = ""
         tampon += satir
     if tampon.strip():
-        telegram_gonder(tampon)
+        cevap_yaz(tampon)
 
 
-# ----------------------------------------------------------------------------
-# Veri okuma / yazma
-# ----------------------------------------------------------------------------
+def linkten_ad_uret(link):
+    """URL'nin son parcasindan okunabilir bir ad cikarir."""
+    try:
+        yol = urllib.parse.urlparse(link).path.strip("/")
+    except ValueError:
+        return "urun"
+
+    parcalar = [p for p in yol.split("/") if p]
+    # En uzun ve anlamli parcayi sec
+    aday = ""
+    for parca in parcalar:
+        temiz = re.sub(r"\.(html?|aspx|php)$", "", parca)
+        if temiz.lower() in GURULTU or temiz.isdigit():
+            continue
+        if len(temiz) > len(aday):
+            aday = temiz
+
+    if not aday:
+        alan = urllib.parse.urlparse(link).netloc.replace("www.", "")
+        return alan or "urun"
+
+    ad = re.sub(r"[-_]+", " ", aday)
+    ad = re.sub(r"\s+", " ", ad).strip()
+    ad = re.sub(r"\b[pP]?\d{5,}\b", "", ad).strip()  # uzun urun kodlarini at
+
+    if len(ad) > 45:
+        kesik = ad[:45].rsplit(" ", 1)[0]
+        ad = kesik if len(kesik) > 15 else ad[:45]
+
+    return ad or "urun"
+
+
+def mesaji_coz(metin):
+    """Mesajdan (ad, link, hedef) uclusunu cikarir. Link yoksa None doner."""
+    eslesme = LINK_DESENI.search(metin)
+    if not eslesme:
+        return None
+
+    link = eslesme.group(0).rstrip(".,;)")
+    kalan = (metin[:eslesme.start()] + " " + metin[eslesme.end():]).strip()
+
+    # Komut on ekini temizle
+    kalan = re.sub(r"^/\w+(@\w+)?\s*", "", kalan).strip()
+
+    # Kalan metindeki tek basina duran sayi -> hedef fiyat
+    hedef = ""
+    sayilar = re.findall(r"\b\d{2,7}\b", kalan)
+    if sayilar:
+        hedef = sayilar[-1]
+        kalan = re.sub(r"\b" + re.escape(hedef) + r"\b", "", kalan).strip()
+
+    ad = re.sub(r"\s+", " ", kalan).strip(" -–—:")
+    if not ad:
+        ad = linkten_ad_uret(link)
+
+    return ad, link, hedef
+
+
 def urunleri_oku():
+    """Her satiri [ad, link, hedef, tam_ad] olarak dondurur."""
     if not URUNLER_DOSYASI.exists():
-        print(f"!! {URUNLER_DOSYASI.name} bulunamadi.")
         return []
-
-    urunler = []
     with open(URUNLER_DOSYASI, encoding="utf-8-sig", newline="") as dosya:
-        for satir in csv.DictReader(dosya):
-            link = (satir.get("link") or "").strip()
-            if not link or not link.startswith("http"):
-                continue
-            urunler.append({
-                "ad": (satir.get("ad") or "").strip() or link[:60],
-                "link": link,
-                "hedef": metni_fiyata_cevir(satir.get("hedef_fiyat")),
-            })
-    return urunler
+        ham = [s for s in csv.reader(dosya) if s and len(s) >= 2][1:]
+    return [(s + ["", "", "", ""])[:4] for s in ham]
 
 
-def gecmisi_oku():
-    if GECMIS_DOSYASI.exists():
+def urunleri_yaz(satirlar):
+    with open(URUNLER_DOSYASI, "w", encoding="utf-8", newline="") as dosya:
+        yazici = csv.writer(dosya)
+        yazici.writerow(["ad", "link", "hedef_fiyat", "tam_ad"])
+        for satir in satirlar:
+            yazici.writerow((satir + ["", "", "", ""])[:4])
+
+
+def arama_adi(satir):
+    """Akakce aramasi icin: varsa sayfadan alinan tam ad, yoksa kullanicinin adi."""
+    return (satir[3].strip() if len(satir) > 3 and satir[3].strip() else satir[0])
+
+
+def durum_oku():
+    if DURUM_DOSYASI.exists():
         try:
-            return json.loads(GECMIS_DOSYASI.read_text(encoding="utf-8"))
+            return json.loads(DURUM_DOSYASI.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            print("!! fiyat_gecmisi.json bozuk, sifirdan baslaniyor.")
-    return {}
+            pass
+    return {"offset": 0}
 
 
-def gecmisi_yaz(gecmis):
-    GECMIS_DOSYASI.write_text(
-        json.dumps(gecmis, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+def durum_yaz(durum):
+    DURUM_DOSYASI.write_text(json.dumps(durum), encoding="utf-8")
 
 
-def para(deger):
-    return f"{deger:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".") + " TL"
-
-
-# ----------------------------------------------------------------------------
-# Ana akis
-# ----------------------------------------------------------------------------
 def main():
-    test_modu = "--test" in sys.argv
-    sinir = None
-    for arg in sys.argv[1:]:
-        if arg.isdigit():
-            sinir = int(arg)
-
-    urunler = urunleri_oku()
-    if not urunler:
-        print("Takip edilecek urun yok. urunler.csv dosyasina link ekleyin.")
+    if not TOKEN or not SOHBET:
+        print("!! Token veya chat ID tanimli degil.")
         return
 
-    if sinir:
-        urunler = urunler[:sinir]
+    durum = durum_oku()
+    yanit = api("getUpdates", {"offset": durum.get("offset", 0), "timeout": 0})
+    if not yanit.get("ok"):
+        return
 
-    gecmis = gecmisi_oku()
-    simdi = datetime.now(TR_SAAT)
-    damga = simdi.strftime("%Y-%m-%d %H:%M")
+    guncellemeler = yanit.get("result", [])
+    if not guncellemeler:
+        print("Yeni mesaj yok.")
+        return
 
-    dususler, hedefler, hatalar = [], [], []
-    print(f"{len(urunler)} urun kontrol ediliyor "
-          f"({'curl_cffi' if _IMPERSONATE else 'requests'} ile)...\n")
+    urunler = urunleri_oku()
+    mevcut_linkler = {s[1].strip() for s in urunler if len(s) > 1}
+    eklenenler, silinenler, atlananlar = [], [], 0
+    son_id = durum.get("offset", 0)
 
-    for sira, urun in enumerate(urunler, 1):
-        link = urun["link"]
-        ad = urun["ad"]
-        kayit = gecmis.setdefault(link, {"ad": ad, "gecmis": []})
-        kayit["ad"] = ad
-
-        try:
-            html = sayfayi_getir(link)
-            fiyat, yontem = fiyat_ayikla(html, link)
-        except Exception as hata:
-            fiyat, yontem = None, None
-            kayit["son_hata"] = f"{damga} - {hata}"
-            hatalar.append(f"{ad}: {hata}")
-            print(f"[{sira}/{len(urunler)}] HATA  {ad} -> {hata}")
-            time.sleep(random.uniform(*BEKLEME))
+    for guncelleme in guncellemeler:
+        son_id = max(son_id, guncelleme.get("update_id", 0) + 1)
+        mesaj = guncelleme.get("message") or guncelleme.get("channel_post")
+        if not mesaj:
+            continue
+        if str(mesaj.get("chat", {}).get("id")) != SOHBET:
             continue
 
-        if fiyat is None:
-            kayit["son_hata"] = f"{damga} - fiyat okunamadi"
-            hatalar.append(f"{ad}: fiyat okunamadi")
-            print(f"[{sira}/{len(urunler)}] ??    {ad} -> fiyat bulunamadi")
-            time.sleep(random.uniform(*BEKLEME))
+        metin = (mesaj.get("text") or mesaj.get("caption") or "").strip()
+        if not metin:
             continue
 
-        kayit.pop("son_hata", None)
-        onceki = kayit.get("son_fiyat")
-        kayit["son_fiyat"] = fiyat
-        kayit["son_kontrol"] = damga
-        kayit["gecmis"].append([damga, fiyat])
-        kayit["gecmis"] = kayit["gecmis"][-GECMIS_LIMIT:]
+        komut = metin.split()[0].split("@")[0].lower()
 
-        en_dusuk = kayit.get("en_dusuk")
-        if en_dusuk is None or fiyat < en_dusuk:
-            kayit["en_dusuk"] = fiyat
-
-        durum = "yeni"
-        if onceki is not None:
-            fark = onceki - fiyat
-            yuzde = (fark / onceki * 100) if onceki else 0
-            if fark > 0 and yuzde >= MIN_DUSUS_YUZDE:
-                durum = f"DUSTU  -%{yuzde:.1f}"
-                rekor = " 🏆 <b>en düşük fiyat!</b>" if fiyat <= kayit["en_dusuk"] else ""
-                dususler.append(
-                    f"\n🔻 <b>{ad}</b>\n"
-                    f"{para(onceki)} → <b>{para(fiyat)}</b>  (−%{yuzde:.1f}){rekor}\n"
-                    f"<a href=\"{link}\">Ürüne git</a>\n"
-                )
-            elif fark < 0:
-                durum = f"zamlandi +%{abs(yuzde):.1f}"
+        # /liste
+        if komut == "/liste":
+            if not urunler:
+                cevap_yaz("Takip listesi boş.")
             else:
-                durum = "degismedi"
+                satirlar = []
+                for i, s in enumerate(urunler, 1):
+                    hedef_not = f" — hedef {s[2]} TL" if len(s) > 2 and s[2] else ""
+                    satirlar.append(
+                        f"\n<b>{i}.</b> {s[0]}{hedef_not}\n"
+                        f"<a href=\"{s[1]}\">Ürün</a> · "
+                        f"<a href=\"{akakce_arama(arama_adi(s))}\">Akakçe'de ara</a>\n"
+                    )
+                parcali_gonder(
+                    satirlar, f"📋 <b>Takip edilen {len(urunler)} ürün</b>\n"
+                )
+            continue
 
-        if urun["hedef"] and fiyat <= urun["hedef"] and not kayit.get("hedef_bildirildi"):
-            kayit["hedef_bildirildi"] = True
-            hedefler.append(
-                f"\n🎯 <b>{ad}</b>\n"
-                f"Hedefiniz {para(urun['hedef'])} — şu an <b>{para(fiyat)}</b>\n"
-                f"<a href=\"{link}\">Ürüne git</a>\n"
-            )
-        elif urun["hedef"] and fiyat > urun["hedef"]:
-            kayit["hedef_bildirildi"] = False
+        # /sil <numara>
+        if komut == "/sil":
+            parcalar = metin.split()
+            if len(parcalar) < 2 or not parcalar[1].isdigit():
+                cevap_yaz("Kullanım: <code>/sil 3</code> — numarayı /liste ile öğrenin.")
+                continue
+            sira = int(parcalar[1])
+            if 1 <= sira <= len(urunler):
+                cikarilan = urunler.pop(sira - 1)
+                silinenler.append(cikarilan[0])
+                mevcut_linkler.discard(cikarilan[1].strip())
+            else:
+                cevap_yaz(f"{sira} numaralı ürün yok. /liste ile bakabilirsiniz.")
+            continue
 
-        print(f"[{sira}/{len(urunler)}] {para(fiyat):>14}  {ad[:45]:<45} "
-              f"({yontem}) {durum}")
+        # Link iceren mesaj
+        cozum = mesaji_coz(metin)
+        if not cozum:
+            continue
 
-        time.sleep(random.uniform(*BEKLEME))
+        ad, link, hedef = cozum
+        if link in mevcut_linkler:
+            atlananlar += 1
+            continue
 
-    if not test_modu:
-        gecmisi_yaz(gecmis)
-        mesajlari_bolerek_gonder(
-            hedefler, f"🎯 <b>Hedef fiyata ulaşan ürünler</b>\n<i>{damga}</i>\n"
-        )
-        mesajlari_bolerek_gonder(
-            dususler, f"📉 <b>Fiyatı düşen ürünler</b>\n<i>{damga}</i>\n"
-        )
-        if hatalar and len(hatalar) >= max(5, len(urunler) // 2):
-            telegram_gonder(
-                f"⚠️ <b>Uyarı:</b> {len(hatalar)}/{len(urunler)} üründe fiyat "
-                f"okunamadı. Site yapısı değişmiş veya bot koruması devreye "
-                f"girmiş olabilir."
-            )
+        print(f"Ekleniyor: {ad}")
+        tam_ad = sayfa_basligi_al(link) or ""
+        if tam_ad:
+            print(f"   sayfa adı: {tam_ad}")
+        urunler.append([ad, link, hedef, tam_ad])
+        mevcut_linkler.add(link)
+        eklenenler.append((ad, hedef, tam_ad or ad))
 
-    print(f"\n{'-' * 60}")
-    print(f"Bitti. Düşen: {len(dususler)} | Hedefe ulaşan: {len(hedefler)} | "
-          f"Okunamayan: {len(hatalar)}")
-    if test_modu:
-        print("(Test modu: hicbir sey kaydedilmedi, bildirim gonderilmedi.)")
+    # Eski kayitlarda tam ad yoksa, her calismada birkacini tamamla
+    tamamlanan = 0
+    for satir in urunler:
+        if tamamlanan >= 5:
+            break
+        if len(satir) > 3 and satir[3].strip():
+            continue
+        tam = sayfa_basligi_al(satir[1])
+        tamamlanan += 1
+        if tam:
+            satir[3] = tam
+            print(f"Tam ad eklendi: {satir[0]} -> {tam}")
+        else:
+            satir[3] = satir[0]
+        time.sleep(1.5)
+
+    durum["offset"] = son_id
+    durum_yaz(durum)
+
+    if eklenenler or silinenler or tamamlanan:
+        urunleri_yaz(urunler)
+
+    # Onay mesaji
+    if eklenenler:
+        satirlar = [
+            f"\n• <b>{ad}</b>" + (f" (hedef {hedef} TL)" if hedef else "")
+            + (f"\n  <i>{tam}</i>" if tam != ad else "")
+            + f"\n  <a href=\"{akakce_arama(tam)}\">Akakçe'de ara</a>\n"
+            for ad, hedef, tam in eklenenler
+        ]
+        satirlar.append(f"\nToplam {len(urunler)} ürün takipte.")
+        parcali_gonder(satirlar, f"✅ <b>{len(eklenenler)} ürün eklendi</b>\n")
+    if silinenler:
+        cevap_yaz("🗑 Silindi: " + ", ".join(silinenler))
+    if atlananlar:
+        cevap_yaz(f"ℹ️ {atlananlar} link zaten listede olduğu için atlandı.")
+
+    print(f"Eklenen: {len(eklenenler)} | Silinen: {len(silinenler)} | "
+          f"Atlanan: {atlananlar} | Toplam: {len(urunler)}")
 
 
 if __name__ == "__main__":
