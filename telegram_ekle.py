@@ -39,14 +39,22 @@ LINK_DESENI = re.compile(r"https?://\S+")
 YOL_GURULTUSU = {
     "urun", "urunler", "product", "products", "p", "dp", "gp", "detay",
     "detail", "item", "items", "tr", "www", "shop", "magaza", "pd", "c",
+    "yorumlar", "yorum", "sepet", "sepete", "satici", "saticilar",
+    "kampanya", "kampanyalar", "fiyat", "fiyatlari", "ürün", "sayfa",
 }
 # Urun adinda ise yaramayan kelimeler
-KELIME_GURULTUSU = {"p", "dp", "urun", "product", "html", "htm", "aspx", "php"}
+KELIME_GURULTUSU = {
+    "p", "dp", "urun", "product", "html", "htm", "aspx", "php",
+    "ve", "ile", "icin", "için",
+}
+
+# 160x200 gibi olculer korunur, kmc12345 gibi kayit numaralari atilir
+OLCU = re.compile(r"^\d+[xX]\d+([xX]\d+)?$")
 
 # HBCV00004ABCDE / B08XYZ1234 gibi stok kodlari
 URUN_KODU = re.compile(r"^(?=.*\d)[A-Za-z0-9]{8,}$")
 
-MAKS_KELIME = 10
+UZUN_ESIK = 7          # bu kadar kelimeden sonrasi bas+son olarak kisaltilir
 MAKS_LINK = 5          # tek mesajda islenecek en fazla link sayisi
 
 
@@ -126,55 +134,97 @@ def _kelimeleri_ayikla(parca):
             continue
         if len(kelime) == 1 and not kelime.isdigit():
             continue                          # "-p-" gibi ayiraclar
+        if OLCU.match(kelime):
+            kelimeler.append(kelime)          # 160x200 gibi olculer
+            continue
         if kelime.isdigit():
             # Sondaki uzun sayi = urun kayit numarasi, at.
             # Ortadaki sayi = model numarasi, tut (Arcelik 270561).
             if (son_mu and len(kelime) >= 4) or len(kelime) >= 9:
                 continue
-        if URUN_KODU.match(kelime) and not re.search(r"[çğıöşüÇĞİÖŞÜ]", kelime):
-            continue                          # HBCV0000..., B08XYZ1234
+        elif re.search(r"\d", kelime) and kelime.isalnum():
+            # Harf+rakam karisimi: uzunsa her yerde, kisaysa yalnizca sonda at
+            turkce = re.search(r"[çğıöşüÇĞİÖŞÜ]", kelime)
+            if not turkce and (len(kelime) >= 8 or (son_mu and len(kelime) >= 5)):
+                continue                      # HBCV0001, B08XYZ1234, 1a2b3c
         kelimeler.append(kelime)
     return kelimeler
 
 
+def _kisalt(kelimeler):
+    """
+    Cok uzun slug'larda bas ve son onemlidir: bas = marka/model,
+    son = urun tipi. Ortadaki nitelik kelimeleri aramayi daraltir.
+    """
+    if len(kelimeler) <= UZUN_ESIK:
+        return kelimeler
+    secilen, gorulen = [], set()
+    for kelime in kelimeler[:3] + kelimeler[-3:]:
+        if kelime.lower() not in gorulen:
+            gorulen.add(kelime.lower())
+            secilen.append(kelime)
+    return secilen
+
+
 def linkten_urun_adi(link):
     """
-    Linkin icindeki urun adini cikarir. Ornek:
-      .../urun/karaca-home-sunflower-cift-kisilik-pike-takimi
-      -> "karaca home sunflower cift kisilik pike takimi"
+    Linkin icindeki urun adini cikarir.
+
+    Urun adi neredeyse her zaman yolun SONUNDAKI parcadadir; kategori
+    parcalari onde durur. Bu yuzden sondan basa dogru taranir.
+      .../ev-tekstili-yatak-ortusu/tac-abril-p-999888  ->  "tac abril"
     Anlamli bir ad cikmazsa None doner.
     """
     parcalar = _yol_parcalari(link)
-    en_iyi, en_iyi_sira = [], -1
-    for sira, parca in enumerate(parcalar):
-        if parca.lower() in YOL_GURULTUSU:
-            continue
-        kelimeler = _kelimeleri_ayikla(parca)
-        if len(kelimeler) > len(en_iyi):
-            en_iyi, en_iyi_sira = kelimeler, sira
+    secilen, secilen_sira = [], -1
 
-    if len(en_iyi) < 2:
+    for sira in range(len(parcalar) - 1, -1, -1):
+        if parcalar[sira].lower() in YOL_GURULTUSU:
+            continue
+        kelimeler = _kelimeleri_ayikla(parcalar[sira])
+        if len(kelimeler) >= 2:
+            secilen, secilen_sira = kelimeler, sira
+            break
+
+    if not secilen:
         return None
 
-    # Marka cogu sitede bir onceki yol parcasinda durur (trendyol.com/tac/...).
-    # Kisa ve gurultu olmayan bir onceki parcayi basa ekle.
-    if en_iyi_sira > 0:
-        onceki = parcalar[en_iyi_sira - 1]
+    # Marka cogu sitede bir onceki parcada durur (trendyol.com/tac/...).
+    # Yalnizca kisa ve kategori olmayan bir onceki parcayi basa ekle.
+    if secilen_sira > 0:
+        onceki = parcalar[secilen_sira - 1]
         if onceki.lower() not in YOL_GURULTUSU:
             onceki_kelimeler = _kelimeleri_ayikla(onceki)
             if 1 <= len(onceki_kelimeler) <= 2:
-                mevcut = {k.lower() for k in en_iyi}
-                yeni = [k for k in onceki_kelimeler if k.lower() not in mevcut]
-                en_iyi = yeni + en_iyi
+                mevcut = {k.lower() for k in secilen}
+                secilen = [k for k in onceki_kelimeler
+                           if k.lower() not in mevcut] + secilen
 
-    ad = " ".join(en_iyi[:MAKS_KELIME])
-    ad = re.sub(r"\s+", " ", ad).strip()
+    ad = re.sub(r"\s+", " ", " ".join(_kisalt(secilen))).strip()
     return ad if len(ad) >= 8 else None
 
 
+ALAN_ADI = re.compile(r"^[\w.-]+\.[a-z]{2,}$", re.IGNORECASE)
+
+
+def etiket_kullanilabilir(ad):
+    """Kullanicinin verdigi ad aramada ise yarar mi? (alan adi ise yaramaz)"""
+    ad = (ad or "").strip()
+    if len(ad) < 3:
+        return False
+    return not ALAN_ADI.match(ad)
+
+
 def arama_terimi(ad, link):
-    """Akakce'de aranacak metin: once linkteki urun adi, olmazsa kisa ad."""
-    return linkten_urun_adi(link) or ad
+    """
+    Akakce'de aranacak metin.
+    Once linkin icindeki urun adi, olmazsa kullanicinin verdigi ad.
+    Ikisi de yoksa None -> arama baglantisi gosterilmez.
+    """
+    linkten = linkten_urun_adi(link)
+    if linkten:
+        return linkten
+    return ad.strip() if etiket_kullanilabilir(ad) else None
 
 
 def akakce_arama(terim):
@@ -206,7 +256,7 @@ def mesaji_coz(metin):
         hedef = sayilar[-1]
         kalan = re.sub(r"\b" + re.escape(hedef) + r"\b", "", kalan).strip()
 
-    etiket = re.sub(r"\s+", " ", kalan).strip(" -–—:")[:80]
+    etiket = re.sub(r"\s+", " ", kalan).strip(" -–—:\"'«»„“”`")[:80]
 
     sonuclar = []
     for sira, eslesme in enumerate(eslesmeler):
@@ -271,12 +321,15 @@ def urun_satiri(sira, satir):
     ad, link, hedef = satir[0], satir[1], satir[2]
     terim = arama_terimi(ad, link)
     hedef_not = f" — hedef {kacir(hedef)} TL" if hedef else ""
-    return (
-        f"\n<b>{sira}.</b> {kacir(ad)}{hedef_not}\n"
-        f"<i>{kacir(terim)}</i>\n"
-        f"<a href=\"{kacir(link)}\">Ürün</a> · "
-        f"<a href=\"{kacir(akakce_arama(terim))}\">Akakçe'de ara</a>\n"
-    )
+    if terim:
+        alt = (f"<i>{kacir(terim)}</i>\n"
+               f"<a href=\"{kacir(link)}\">Ürün</a> · "
+               f"<a href=\"{kacir(akakce_arama(terim))}\">Akakçe'de ara</a>\n")
+    else:
+        alt = (f"<a href=\"{kacir(link)}\">Ürün</a>\n"
+               f"<i>Arama için ad yok — /sil ile çıkarıp marka ve modelle "
+               f"tekrar ekleyin.</i>\n")
+    return f"\n<b>{sira}.</b> {kacir(ad)}{hedef_not}\n" + alt
 
 
 def main():
@@ -357,10 +410,15 @@ def main():
         for satir in eklenenler:
             terim = arama_terimi(satir[0], satir[1])
             hedef_not = f" (hedef {kacir(satir[2])} TL)" if satir[2] else ""
+            if terim:
+                alt = (f"<i>{kacir(terim)}</i>\n"
+                       f"<a href=\"{kacir(akakce_arama(terim))}\">"
+                       f"Akakçe'de ara</a>\n")
+            else:
+                alt = ("<i>⚠️ Bu linkte ürün adı yok. Akakçe araması için "
+                       "ürünü marka ve modelle birlikte yazın.</i>\n")
             satirlar.append(
-                f"\n• <b>{kacir(satir[0])}</b>{hedef_not}\n"
-                f"<i>{kacir(terim)}</i>\n"
-                f"<a href=\"{kacir(akakce_arama(terim))}\">Akakçe'de ara</a>\n"
+                f"\n• <b>{kacir(satir[0])}</b>{hedef_not}\n" + alt
             )
         satirlar.append(f"\nToplam {len(urunler)} ürün takipte.")
         parcali_gonder(satirlar, f"✅ <b>{len(eklenenler)} ürün eklendi</b>\n")
