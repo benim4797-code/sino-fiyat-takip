@@ -537,10 +537,14 @@
    [
     "2026-11-20 13:41",
     1999.0
+   ],
+   [
+    "2026-11-20 22:22",
+    1999.0
    ]
   ],
   "son_fiyat": 1999.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 1999.0
  },
  "https://www.karaca.com/urun/karaca-home-uniq-100-pamuk-cift-kisilik-saten-nevresim-takimi-terracota": {
@@ -985,10 +989,14 @@
    [
     "2026-11-20 13:41",
     2999.0
+   ],
+   [
+    "2026-11-20 22:22",
+    2999.0
    ]
   ],
   "son_fiyat": 2999.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 2519.1
  },
  "https://www.karaca.com/urun/karaca-stream-bone-saturn-53-parca-12-kisilik-yemek-takimi-platin": {
@@ -1433,10 +1441,14 @@
    [
     "2026-11-20 13:41",
     22999.0
+   ],
+   [
+    "2026-11-20 22:22",
+    22999.0
    ]
   ],
   "son_fiyat": 22999.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 19999.0
  },
  "https://www.dyson.com.tr/v12-detect-slim-absolute-kablosuz-supurge": {
@@ -1873,10 +1885,14 @@
    [
     "2026-11-20 13:41",
     35999.0
+   ],
+   [
+    "2026-11-20 22:22",
+    35999.0
    ]
   ],
   "son_fiyat": 35999.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 34999.0
  },
  "https://www.dyson.com.tr/v16-piston-animal-mat-siyah-bakir": {
@@ -2317,10 +2333,14 @@
    [
     "2026-11-20 13:41",
     43999.0
+   ],
+   [
+    "2026-11-20 22:22",
+    47999.0
    ]
   ],
-  "son_fiyat": 43999.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_fiyat": 47999.0,
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 43999.0
  },
  "https://www.gallerycrystal.com.tr/neoflam-perfect-seal-8-parca-cam-saklama-kabi-bej-9176": {
@@ -2765,10 +2785,14 @@
    [
     "2026-11-20 13:41",
     3552.0
+   ],
+   [
+    "2026-11-20 22:22",
+    3552.0
    ]
   ],
   "son_fiyat": 3552.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 3552.0
  },
  "https://amzn.eu/d/06nq3ZlF": {
@@ -2818,7 +2842,7 @@
   "son_fiyat": 8.0,
   "son_kontrol": "2026-11-18 03:09",
   "en_dusuk": 6.0,
-  "son_hata": "2026-11-20 13:41 - fiyat okunamadi"
+  "son_hata": "2026-11-20 22:22 - fiyat okunamadi"
  },
  "https://amzn.eu/d/0cfl0qY8": {
   "ad": "Normal ütü",
@@ -2871,7 +2895,7 @@
   "son_fiyat": 2199.0,
   "son_kontrol": "2026-11-18 03:09",
   "en_dusuk": 5.0,
-  "son_hata": "2026-11-20 13:41 - fiyat okunamadi"
+  "son_hata": "2026-11-20 22:22 - fiyat okunamadi"
  },
  "https://www.karaca.com/urun/karaca-home-hilary-cicek-nakisli-cift-kisilik-pike-yatak-ortusu-takimi-pudra": {
   "ad": "Pike",
@@ -3243,16 +3267,20 @@
    [
     "2026-11-20 13:41",
     1999.0
+   ],
+   [
+    "2026-11-20 22:22",
+    1999.0
    ]
   ],
   "son_fiyat": 1999.0,
-  "son_kontrol": "2026-11-20 13:41",
+  "son_kontrol": "2026-11-20 22:22",
   "en_dusuk": 1999.0
  },
  "https://ty.gl/agnek9vhzyp2c": {
   "ad": "Kettle",
   "gecmis": [],
-  "son_hata": "2026-11-20 13:41 - fiyat okunamadi"
+  "son_hata": "2026-11-20 22:22 - fiyat okunamadi"
  },
  "https://www.mediamarkt.com.tr/tr/product/_dyson-v12-detect-slim-absolute-kablosuz-sarjli-dikey-supurge-1255404.html?ref=akakce&v=1.28.3": {
   "ad": "Daysın media",
@@ -3334,16 +3362,16 @@
   "son_kontrol": "2026-11-19 22:42",
   "en_dusuk": 27899.0,
   "hedef_bildirildi": false,
-  "son_hata": "2026-11-20 13:41 - HTTP 403"
+  "son_hata": "2026-11-20 22:22 - HTTP 403"
  },
  "https://ty.gl/qwc8erxhjzldo": {
   "ad": "Yemek takımı",
   "gecmis": [],
-  "son_hata": "2026-11-20 13:41 - fiyat okunamadi"
+  "son_hata": "2026-11-20 22:22 - fiyat okunamadi"
  },
  "https://ty.gl/at21hxwc3z8og": {
   "ad": "6 kişilik aryıldız aria",
   "gecmis": [],
-  "son_hata": "2026-11-20 13:41 - fiyat okunamadi"
+  "son_hata": "2026-11-20 22:22 - fiyat okunamadi"
  }
 }
